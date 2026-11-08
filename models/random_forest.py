@@ -1,70 +1,65 @@
+import pickle
+from pathlib import Path
+
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 
 
-class RandomForestTextClassifier:
-    def __init__(self, encoder, n_estimators=300, max_depth=None,
-                 min_samples_split=2, min_samples_leaf=1, class_weight=None):
+class RandomForestTextClassifier: 
+    def __init__(self, n_estimators=300, class_weight="balanced", random_state=0,
+                 n_jobs=-1):
         """
-        Initializes the RandomForest model.
+        Initializes Random Forest classifier.
 
         Args:
-            encoder: Chosen tokenizer.
-            n_estimators: Number of trees in the forest.
-            max_depth: Defaults to None, nodes are expanded until all
-            leaves contain less than min_samples_split samples or all leaves
-            are pure.
-            class_weight: Defaults to None - maybe edit with the offensive
-            dataset label distribution.
+            n_estimators: Number of trees. Defaults to 300.
+            class_weight: Defaults to "balanced".
+            random_state: Defaults to 0.
+            n_jobs: Defaults to -1, value reused form the tutorial.
         """
-        self.encoder = encoder
-        self.model = RandomForestClassifier(n_estimators=n_estimators,
-                                            max_depth=max_depth,
-                                            min_samples_split=min_samples_split,
-                                            min_samples_leaf=min_samples_leaf,
-                                            class_weight=class_weight)
+        self.n_estimators = n_estimators
+        self.class_weight = class_weight
+        self.random_state = random_state
+        self.n_jobs = n_jobs
+        self.model = None
 
-    def fit(self, x_train: np.ndarray, y_train: np.ndarray, epochs: int):
+    def _encode(self, texts, encoder):
         """
-        Trains the Random Forest model.
+        Encode text using the encoder/tokenizer being used.
+        """
+        return np.vstack([
+            np.asarray(encoder(text), dtype=np.float32).ravel()
+            for text in texts
+        ])
 
-        Args:
-            x_train (np.ndarray): Training data.
-            y_train (np.ndarray): Training labels.
-            epochs (int): Number of training epochs.
-        """
-        X = self._encode(x_train)
-        self.model.fit(X, y_train, epochs=epochs)
+    def fit(self, texts, labels, encoder):
+        features = self._encode(texts, encoder)
+
+        self.model = RandomForestClassifier(
+            n_estimators=self.n_estimators,
+            class_weight=self.class_weight,
+            random_state=self.random_state,
+            n_jobs=self.n_jobs,
+        )
+
+        self.model.fit(features, labels)
         return self
 
-    def predict(self, x_test: np.ndarray):
-        """
-        Evaluates the trained model on test data.
+    def predict(self, texts, encoder):
+        return self.model.predict(self._encode(texts, encoder))
 
-        Args:
-            x_test (np.ndarray): Test data.
-        """
-        X = self._encode(x_test)
-        return self.model.predict(X)
+    def predict_probs(self, texts, encoder):
+        return self.model.predict_proba(self._encode(texts, encoder))
 
-    def predict_proba(self, texts: np.ndarray):
-        """
-        (same as the tutorial)
-        Predicts labels (via the most probable class decision rule) for a collection of texts. 
-        (scikit-learn hard-codes the most probable class as the decision rule of choice)
-        
-        texts: a list of texts, each a string
-        encoder: the Encoder used for in the model's training
-        """
-        X = self._encode(texts)
-        return self.model.predict_proba(X)
+    # saving and loading trained model for easier evaluation and future uses
+    def save(self, path):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _encode(self, texts: np.ndarray, labels: np.ndarray):
-        """
-        Encodes texts using the chosen tokenizer.
+        with open(f"{path}.pickle", "wb") as file:
+            pickle.dump(self, file)
 
-        Args:
-            texts (np.ndarray): Data.
-            labels (np.ndarray): Labels.
-        """
-        return [self.encoder(text) for text, label in texts]
+    @classmethod
+    def load(cls, path):
+        with open(f"{path}.pickle", "rb") as file:
+            return pickle.load(file)

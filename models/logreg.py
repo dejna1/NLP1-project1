@@ -1,156 +1,64 @@
-import numpy as np
+import pickle
+from pathlib import Path
+from scipy.sparse import csr_matrix
+from sklearn.linear_model import LogisticRegression
 
 
-class LogisticRegression():
+class LogisticRegressionTextClassifier:
     """
     Logistic Regression classifier for binary classification.
 
-    Implementation includes gradient descent optimization with validation monitoring
-    and binary cross-entropy loss tracking.
-
-    Attributes:
-        learning_rate: Learning rate for gradient descent
-        n_iterations: Number of training iterations
-        val_observations: Validation features for monitoring
-        val_ground_truth: Validation labels for monitoring
-        train_loss: List storing training loss over iterations
-        val_loss: List storing validation loss over iterations
-        parameters: Dictionary storing model parameters (weights, bias)
+    Uses scikit-learn's LogisticRegression.
     """
 
-    def __init__(
-        self,
-        X_val: np.ndarray,
-        y_val: np.ndarray,
-        learning_rate=0.01,
-        n_iterations=2000,
-    ):
+    def __init__(self, solver="saga", max_iter=1000, class_weight="balanced",
+                 random_state=0):
         """
-        Initialize Logistic Regression model.
+        Initializes LogReg.
 
         Args:
-            X_val: Validation features for monitoring during training
-            y_val: Validation labels for monitoring during training
-            learning_rate: Learning rate for gradient descent (default: 0.01)
-            n_iterations: Number of training iterations (default: 2000)
-
-        Raises:
-            ValueError: If X_val and y_val have incompatible shapes
+            solver (str): Defaults to "saga", same as in the tutorial.
+            max_iter (int): Defaults to 1000.
+            class_weight (str): Defaults to "balanced".
+            random_state (int): Defaults to 0, as solver defaults to 'saga'.
         """
-        self.learning_rate = learning_rate
-        self.n_iterations = n_iterations
-        self.val_observations = X_val
-        self.val_ground_truth = y_val
-        self.train_loss = []
-        self.val_loss = []
-        # store weights and bias
-        self.parameters = {}
+        self.solver = solver
+        self.max_iter = max_iter
+        self.class_weight = class_weight
+        self.random_state = random_state
+        self.model = None
 
-    def _sigmoid(self, z: np.ndarray) -> float:
+    def _encode(self, texts, encoder):
         """
-        Sigmoid activation function.
-
-        Converts input values to probabilities between 0 and 1.
-
-        Args:
-            z: Input values (numpy array or scalar)
-
-        Returns:
-            Probabilities in range (0, 1)
+        Encode text using the encoder/tokenizer being used.
         """
-        return 1 / (1 + np.exp(-z))
+        return csr_matrix([encoder(text) for text in texts])
 
-    def _log_loss(self, y_true, y_pred):
-        """
-        Compute binary cross-entropy loss.
+    def fit(self, texts, labels, encoder):
+        X = self._encode(texts, encoder)
 
-        Args:
-            y_true: True labels
-            y_pred: Predicted probabilities
+        self.model = LogisticRegression(solver=self.solver,
+                                        max_iter=self.max_iter,
+                                        class_weight=self.class_weight,
+                                        random_state=self.random_state)
+        self.model.fit(X, labels)
+        return self
 
-        Returns:
-            Binary cross-entropy loss value
-        """
-        eps = 1e-8
-        y_pred = np.clip(y_pred, eps, 1 - eps)
-        return -np.mean(
-            y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred)
-        )
+    def predict(self, texts, encoder):
+        return self.model.predict(self._encode(texts, encoder))
 
-    def fit(self, observations: np.ndarray, ground_truth: np.ndarray) -> None:
-        """
-        Train the logistic regression model using gradient descent.
+    def predict_probs(self, texts, encoder):
+        return self.model.predict_proba(self._encode(texts, encoder))
 
-        Args:
-            observations: Training features (numpy array)
-            ground_truth: Training labels (numpy array)
+    # saving and loading trained model for easier evaluation and future uses
+    def save(self, path):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-        Side Effects:
-            - Updates model weights and bias
-            - Tracks training and validation loss over iterations
-            - Stores final parameters in self.parameters
+        with open(f"{path}.pickle", "wb") as file:
+            pickle.dump(self, file)
 
-        Raises:
-            ValueError: If observations and ground_truth have incompatible shapes
-        """
-        # retrieve dimensions
-        n_samples, n_features = observations.shape
-
-        # initialize weight and bias
-        self.weight = np.zeros(n_features)
-        self.bias = 0.0
-
-        # implemented gradient descent
-        for _ in range(self.n_iterations):
-            linear_output = np.dot(observations, self.weight) + self.bias
-            predictions = self._sigmoid(linear_output)
-
-            # gradients
-            error = predictions - ground_truth
-            gradient_weight = (1 / n_samples) * np.dot(observations.T, error)
-            gradient_bias = (1 / n_samples) * np.sum(error)
-
-            # update
-            self.weight -= self.learning_rate * gradient_weight
-            self.bias -= self.learning_rate * gradient_bias
-
-            self.train_loss.append(self._log_loss(ground_truth, predictions))
-
-            val_logits = np.dot(self.val_observations, self.weight) + self.bias
-            val_pred = self._sigmoid(val_logits)
-            self.val_loss.append(
-                self._log_loss(self.val_ground_truth, val_pred)
-            )
-
-        self.parameters = {"weights": self.weight, "bias": self.bias}
-
-    def predict(self, observations: np.ndarray) -> np.ndarray:
-        """
-        Make binary predictions using the trained model.
-
-        Args:
-            observations: Input features for prediction (numpy array)
-
-        Returns:
-            Binary predictions (0 or 1) as numpy array
-
-        Raises:
-            RuntimeError: If model has not been trained (weights not initialized)
-        """
-        linear_output = np.dot(observations, self.weight) + self.bias
-        probs = self._sigmoid(linear_output)
-        return (probs >= 0.5).astype(int)
-
-    def predict_proba(self, observations: np.ndarray) -> np.ndarray:
-        """
-        Return probability predictions for logistic regression.
-
-        Args:
-            observations: Input features for probability prediction (numpy array)
-
-        Returns:
-            Probability array where each row contains [P(class_0), P(class_1)]
-        """
-        linear_output = np.dot(observations, self.weight) + self.bias
-        probs = self._sigmoid(linear_output)
-        return np.vstack((1 - probs, probs)).T
+    @classmethod
+    def load(cls, path):
+        with open(f"{path}.pickle", "rb") as file:
+            return pickle.load(file)
